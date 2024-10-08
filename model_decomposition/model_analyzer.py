@@ -4,6 +4,7 @@
 # License: MIT
 # See the LICENSE for more details.
 #
+from itertools import chain
 
 import onnx
 from onnx2tflite.src.converter.convert import convert_model
@@ -66,3 +67,5 @@ class ModelAnalyzer:
                     pass
 
         return convertible_nodes
+
+
