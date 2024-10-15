@@ -4,9 +4,9 @@
 # License: MIT
 # See the LICENSE for more details.
 #
-from itertools import chain
 
 import onnx
+import onnx2tflite.src.logger
 from onnx2tflite.src.converter.convert import convert_model
 
 from model_decomposition.onnx_model_utils import create_single_node_model, node_has_all_shapes_defined
@@ -36,6 +36,9 @@ class ModelAnalyzer:
         assert isinstance(model, onnx.ModelProto)
 
         self.model = model
+
+        # Supress the output of the `onnx2tflite`.
+        onnx2tflite.src.logger.MIN_OUTPUT_IMPORTANCE = onnx2tflite.src.logger.MessageImportance.ERROR
 
     def get_nodes_convertible_to_tflite(self) -> list[onnx.NodeProto]:
         """ Analyze the provided ONNX model and determine which nodes can be converted to TFLite and which can't.
@@ -67,5 +70,3 @@ class ModelAnalyzer:
                     pass
 
         return convertible_nodes
-
-
