@@ -4,6 +4,7 @@
 # License: MIT
 # See the LICENSE for more details.
 #
+
 from dataclasses import dataclass
 from itertools import chain
 
@@ -37,36 +38,27 @@ class ModelDecomposer:
 
     def _create_model_segment_from_group(self, group: NodeGroup, inputs: list[str], outputs: list[str],
                                          index: int) -> ModelSegment:
+        segment = ModelSegment(f'segment_{index}', group.format, inputs, outputs)
+
+        # Create an ONNX model with the given `group.nodes` and necessary initializers.
+        onnx_model = create_model_with_nodes(self.model, group.nodes, inputs, outputs)
+
         if group.format == ModelFormat.ONNX:
-            # Create an ONNX model with the given `group.nodes` and necessary initializers.
-            onnx_model = create_model_with_nodes(self.model, group.nodes, inputs, outputs)
-
-            segment = ModelSegment({
-                'name': f'segment_{index}.onnx',
-                'inputs': inputs,
-                'outputs': outputs,
-            }, data=onnx_model.SerializeToString())
-
-            return segment
+            segment.raw_data = onnx_model.SerializeToString()
 
         elif group.format == ModelFormat.TFLite:
             # Create an ONNX model with the given `group.nodes` and necessary initializers.
-            onnx_model = create_model_with_nodes(self.model, group.nodes, inputs, outputs)
             try:
                 tflite_model = convert_model(onnx_model)
-                segment = ModelSegment({
-                    'name': f'segment_{index}.tflite',
-                    'inputs': inputs,
-                    'outputs': outputs,
-                }, data=tflite_model)
-
-                return segment
+                segment.raw_data = tflite_model
 
             except Exception as e:
                 raise Exception('_create_model_segment_from_group(): failed to convert the segment to TFLite.') from e
 
         else:
             raise ValueError(f'_create_model_segment_from_group(): Unsupported format: {group.format}')
+
+        return segment
 
     def _split_model_into_groups(self, convertible_nodes: list[onnx.NodeProto]) -> list[NodeGroup]:
         groups = [

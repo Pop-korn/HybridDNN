@@ -26,20 +26,34 @@ class ModelSegment:
     outputs: list[str]
     raw_data: bytes  # The binary model.
 
-    def __init__(self, json_segment: dict[str, str | list[str]], data: bytes) -> None:
-        try:
-            self.file_name = json_segment['name']
-            self.format = self._parse_model_format(self.file_name)
-            self.inputs = json_segment['inputs']
-            self.outputs = json_segment['outputs']
-            self.raw_data = data
+    def __init__(self, file_name: str | None = None, format_: ModelFormat | None = None,
+                 inputs: list[str] | None = None, outputs: list[str] | None = None,
+                 raw_data: bytes | None = None) -> None:
+        if file_name is not None and format_ is not None:
+            self.file_name = f'{file_name}.{format_.value}'
+        self.format = format_
+        self.inputs = inputs
+        self.outputs = outputs
+        self.raw_data = raw_data
 
+    @classmethod
+    def from_json(cls, json_segment: dict[str, str | list[str]], data: bytes) -> 'ModelSegment':
+        try:
+            obj = cls()
+
+            obj.file_name = json_segment['name']
+            obj.format = obj._parse_model_format(obj.file_name)
+            obj.inputs = json_segment['inputs']
+            obj.outputs = json_segment['outputs']
+            obj.raw_data = data
+
+            return obj
 
         except KeyError as e:
-            if not hasattr(self, 'name'):
+            if (file_name := json_segment.get('name', None)) is None:
                 message = 'Invalid format of `meta.json` file. Failed to parse the name of a model segment.'
             else:
-                message = f'Invalid format of `meta.json` file. Failed to parse model segment `{self.file_name}`.'
+                message = f'Invalid format of `meta.json` file. Failed to parse model segment `{file_name}`.'
 
             raise KeyError(message) from e
 
@@ -84,7 +98,7 @@ class HybridModel:
                 # Parse the individual model segments.
                 for segment in meta['segments']:
                     with zf.open(segment['name'], 'r') as segment_file:
-                        self.model_segments.append(ModelSegment(segment, segment_file.read()))
+                        self.model_segments.append(ModelSegment.from_json(segment, segment_file.read()))
 
         except KeyError as e:
             raise KeyError(f'Failed to parse the hdnn file `{path}`. It is not in the expected format.') from e
