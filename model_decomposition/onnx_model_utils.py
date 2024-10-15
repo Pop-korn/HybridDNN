@@ -49,6 +49,34 @@ def create_single_node_model(from_model: onnx.ModelProto, node: onnx.NodeProto) 
     return onnx.helper.make_model(graph)
 
 
+def create_model_with_nodes(from_model: onnx.ModelProto, nodes: list[onnx.NodeProto], inputs: list[str],
+                            outputs: list[str]) -> onnx.ModelProto:
+    """ Create an ONNX model which is based on `from_model` and contains the given `nodes`.
+         Include all the necessary `initializers`, `inputs` and `outputs`.
+
+    :param from_model: ONNX model containing the `nodes` and all ValueInfoProto and Initializer objects they refer to.
+    :param nodes: ONNX nodes which will be the only nodes in the returned model.
+    :param inputs: Names of the input tensors of the created model.
+    :param outputs: Names of the output tensors of the created model.
+    :return: An ONNX model containing just the given `nodes`.
+    """
+    if not all(_vi_exists(from_model, name) for name in chain(inputs, outputs)):
+        raise Exception('create_model_with_nodes(): the source model does not contain the necessary value info.')
+
+    node_inputs = set(chain.from_iterable(node.input for node in nodes))
+    used_initializers = [t for t in from_model.graph.initializer if t.name in node_inputs]
+
+    graph = onnx.helper.make_graph(
+        nodes,
+        'model_segment',
+        [_vi_for_name(from_model, input_) for input_ in inputs],
+        [_vi_for_name(from_model, output) for output in outputs],
+        used_initializers
+    )
+
+    return onnx.helper.make_model(graph)
+
+
 def _get_tensor_shape(model: onnx.ModelProto, tensor_name: str) -> list[int] | None:
     """ Return the shape of a tensor with given `tensor_name` from the `model`. """
     for vi in chain(model.graph.input, model.graph.output, model.graph.value_info):
