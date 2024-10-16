@@ -30,7 +30,8 @@ class ModelSegment:
                  inputs: list[str] | None = None, outputs: list[str] | None = None,
                  raw_data: bytes | None = None) -> None:
         if file_name is not None and format_ is not None:
-            self.file_name = f'{file_name}.{format_.value}'
+            file_extension = '.tflite' if format_ == ModelFormat.TFLite else '.onnx'
+            self.file_name = file_name + file_extension
         self.format = format_
         self.inputs = inputs
         self.outputs = outputs
@@ -79,6 +80,8 @@ class HybridModel:
     """
 
     model_segments: list[ModelSegment]
+    inputs: list[str]
+    outputs: list[str]
 
     def __init__(self, path: str | None = None):
         """ If `path` is provided, the model is also immediately loaded. """
@@ -95,6 +98,10 @@ class HybridModel:
                     json_data = meta_file.read().decode('utf-8')
                     meta = json.loads(json_data)
 
+                # Parse the inputs and outputs of the whole graph.
+                self.inputs = meta['inputs']
+                self.outputs = meta['outputs']
+
                 # Parse the individual model segments.
                 for segment in meta['segments']:
                     with zf.open(segment['name'], 'r') as segment_file:
@@ -108,6 +115,8 @@ class HybridModel:
 
         # First create the JSON `meta file` based on the data in the individual segments.
         meta = {
+            'inputs': self.inputs,
+            'outputs': self.outputs,
             'segments': [
                 segment.to_json() for segment in self.model_segments
             ]
