@@ -167,6 +167,8 @@ class ModelDecomposer:
 
         # Combine the segments into a `HybridModel`.
         hybrid_model = HybridModel()
+        hybrid_model.inputs = [vi.name for vi in self.model.graph.input]
+        hybrid_model.outputs = [vi.name for vi in self.model.graph.output]
         hybrid_model.model_segments = segments
 
         return hybrid_model
