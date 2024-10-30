@@ -73,6 +73,12 @@ class ModelSegment:
             'outputs': self.outputs
         }
 
+    def __repr__(self) -> str:
+        return f'''\t- `{self.file_name}` ({self.format.name}).
+        Inputs: {self.inputs}
+        Outputs: {self.outputs}
+'''
+
 
 class HybridModel:
     """ Class represents a DNN model which is divided into multiple segments in different formats. These segments can
@@ -130,3 +136,9 @@ class HybridModel:
             # Save the individual TFLite and ONNX model segments.
             for segment in self.model_segments:
                 zf.writestr(segment.file_name, segment.raw_data)
+
+    def __repr__(self) -> str:
+        description = f'Model of {len(self.model_segments)} segments.\n'
+        segments_description = [repr(segment) for segment in self.model_segments]
+
+        return description + ''.join(segments_description)
