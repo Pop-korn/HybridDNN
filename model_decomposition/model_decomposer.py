@@ -89,7 +89,6 @@ class ModelDecomposer:
             """ Get the `ModelFormat` of the given `node_`. Either `TFLite` or `ONNX`. """
             return ModelFormat.TFLite if node_ in convertible_nodes else ModelFormat.ONNX
 
-        current_group = 0
         for node in self.model.graph.node:
             # noinspection PySimplifyBooleanCheck
             if groups[0].nodes == []:
@@ -113,6 +112,7 @@ class ModelDecomposer:
                 group.nodes.append(node)
                 group.tensors.extend(node.output)
                 node_added = True
+                break
 
             if not node_added:
                 # There is no existing group suitable for `node`. Create a new group and add the `node` to it.
