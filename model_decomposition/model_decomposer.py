@@ -6,6 +6,7 @@
 #
 
 from dataclasses import dataclass
+from enum import Enum
 from itertools import chain
 
 import onnx
@@ -14,6 +15,13 @@ from onnx2tflite.src.converter.convert import convert_model
 from model_decomposition.model_analyzer import ModelAnalyzer
 from model_decomposition.onnx_model_utils import create_model_with_nodes
 from model_format.hybrid_model import HybridModel, ModelFormat, ModelSegment
+
+
+class DecompositionStrategy(Enum):
+    NAIVE = 1  # Convert every operator that can be converted.
+
+    # Convert all nodes which can utilize HW accelerators to `TFLite`, while minimizing the number of model segments.
+    RATIONAL = 2
 
 
 @dataclass
@@ -60,7 +68,7 @@ class ModelDecomposer:
 
         return segment
 
-    def _split_model_into_groups(self, convertible_nodes: list[onnx.NodeProto]) -> list[NodeGroup]:
+    def _split_model_into_groups(self, nodes_to_convert: list[onnx.NodeProto]) -> list[NodeGroup]:
         groups = [
             NodeGroup(
                 nodes=[],
@@ -87,7 +95,7 @@ class ModelDecomposer:
 
         def _node_format(node_: onnx.NodeProto) -> ModelFormat:
             """ Get the `ModelFormat` of the given `node_`. Either `TFLite` or `ONNX`. """
-            return ModelFormat.TFLite if node_ in convertible_nodes else ModelFormat.ONNX
+            return ModelFormat.TFLite if node_ in nodes_to_convert else ModelFormat.ONNX
 
         for node in self.model.graph.node:
             # noinspection PySimplifyBooleanCheck
@@ -125,7 +133,7 @@ class ModelDecomposer:
 
         return groups
 
-    def _get_inputs_of_segment_represented_by_node_group(self, group: NodeGroup) -> set[str]:
+    def _get_external_inputs_of_node_group(self, group: NodeGroup) -> set[str]:
         """ Get a set of names of tensors which are external inputs to this node group. That means all node inputs which
              are not also outputs of other nodes in this group and are not initializers.
         """
@@ -136,16 +144,9 @@ class ModelDecomposer:
         # The segment inputs are tensors which are not produced within the segment and are not static initializers.
         return all_node_inputs - all_node_outputs - initializers
 
-    def create_hybrid_model(self):  # TODO Select decomposition strategy.
-        analyzer = ModelAnalyzer(self.model)
-        convertible_nodes = analyzer.get_nodes_convertible_to_tflite()
-        self.model = analyzer.model
-
-        # Each group contains nodes which will make up 1 model segment.
-        node_groups = self._split_model_into_groups(convertible_nodes)
-
-        # Determine the inputs of all individual segments, which are represented as node group.
-        segment_inputs = [self._get_inputs_of_segment_represented_by_node_group(group) for group in node_groups]
+    def _create_model_segments_from_node_groups(self, node_groups: list[NodeGroup]) -> list[ModelSegment]:
+        # Determine the inputs of all individual segments, which are represented as node groups.
+        segment_inputs = [self._get_external_inputs_of_node_group(group) for group in node_groups]
 
         # Determine the outputs of all individual segments. That is, all tensors produced by nodes in the group, which
         #  are also consumed by other node group, or are model outputs.
@@ -164,6 +165,44 @@ class ModelDecomposer:
         segments = []
         for idx, (group, inputs, outputs) in enumerate(zip(node_groups, segment_inputs, segment_outputs)):
             segments.append(self._create_model_segment_from_group(group, list(inputs), list(outputs), idx))
+
+        return segments
+
+    def _merge_tflite_node_groups_without_accelerable_nodes_with_neighboring_groups(self, node_groups: list[NodeGroup],
+                                                                                    analyzer: ModelAnalyzer
+                                                                                    ) -> list[NodeGroup]:
+        nodes_to_convert = []
+        for node_group in node_groups:
+            if node_group.format != ModelFormat.TFLite:
+                continue
+
+            if any(analyzer.node_will_be_accelerated_in_tflite(node) for node in node_group.nodes):
+                # Some nodes can be accelerated in this group, so it should still get converted to `TFLite`.
+                nodes_to_convert.extend(node_group.nodes)
+
+            else:
+                # This group should be left in `ONNX`.
+                pass
+
+        return self._split_model_into_groups(nodes_to_convert)
+
+    def create_hybrid_model(self, decomposition_strategy: DecompositionStrategy = DecompositionStrategy.NAIVE
+                            ) -> HybridModel:
+        analyzer = ModelAnalyzer(self.model)
+        convertible_nodes = analyzer.get_nodes_convertible_to_tflite()
+        self.model = analyzer.model
+
+        # Divide the model into groups of nodes.
+        node_groups = self._split_model_into_groups(convertible_nodes)
+
+        if decomposition_strategy == DecompositionStrategy.RATIONAL:
+            # Search for `TFLite` groups which only contain nodes that don't use HW accelerators. Remove these groups
+            #  and merge their operators into neighbouring `ONNX` groups.
+            node_groups = self._merge_tflite_node_groups_without_accelerable_nodes_with_neighboring_groups(node_groups,
+                                                                                                           analyzer)
+
+        # Each group contains nodes which will make up 1 model segment.
+        segments = self._create_model_segments_from_node_groups(node_groups)
 
         # Combine the segments into a `HybridModel`.
         hybrid_model = HybridModel()
