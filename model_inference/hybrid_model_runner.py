@@ -18,11 +18,11 @@ from model_format.hybrid_model import HybridModel, ModelFormat
 class ModelRunner(ABC):
     @abstractmethod
     def __init__(self, model_raw_data: bytes):
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def run(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
-        pass
+        raise NotImplementedError
 
 
 class TFLiteRunner(ModelRunner):
@@ -97,12 +97,13 @@ class HybridModelRunner:
 
         for segment, segment_runner in zip(self.hybrid_model.model_segments, self.segment_runners):
             # TODO This significantly slows down the inference. Verify statically in the `__init__()` method that this
-            #  whill not cause problems.
-            for input_ in segment.inputs:
-                if input_ not in known_tensors.keys():
-                    raise KeyError(f'HybridModelRunner.run(): Invalid hybrid model. Segment `{segment.file_name}` '
-                                   f'requires the input tensor `{input_}`, which is not a model input nor an output of '
-                                   'a previous segment.')
+            #  will not cause problems.
+            # for input_ in segment.inputs:
+            #     if input_ not in known_tensors.keys():
+            #         raise KeyError(f'HybridModelRunner.run(): Invalid hybrid model. Segment `{segment.file_name}` '
+            #                        f'requires the input tensor `{input_}`, which is not a model input nor an output of '
+            #                        'a previous segment.')
+
 
             inputs = {name: data for name, data in known_tensors.items() if name in segment.inputs}
             outputs = segment_runner.run(inputs)

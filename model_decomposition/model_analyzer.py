@@ -70,3 +70,8 @@ class ModelAnalyzer:
                     pass
 
         return convertible_nodes
+
+    # noinspection PyMethodMayBeStatic
+    def node_will_be_accelerated_in_tflite(self, node: onnx.NodeProto) -> bool:
+        """ Return `True`, if the provided `node` will use HW accelerators after conversion to TFLite. """
+        return node.op_type in {'Conv', 'Gemm'}  # TODO Verify and modify.
