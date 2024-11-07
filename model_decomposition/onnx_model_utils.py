@@ -6,7 +6,9 @@
 #
 
 from itertools import chain
+from typing import Callable
 
+import numpy as np
 import onnx
 
 
@@ -31,26 +33,23 @@ def _vi_exists(model: onnx.ModelProto, name: str) -> bool:
     return len([vi for vi in _all_model_value_info(model) if vi.name == name]) > 0
 
 
-def create_single_node_model(from_model: onnx.ModelProto, node: onnx.NodeProto) -> onnx.ModelProto:
+def create_single_node_model(from_model: onnx.ModelProto, node: onnx.NodeProto,
+                             get_tensor_data: Callable[[str], np.ndarray | None]) -> onnx.ModelProto:
     """ Create an ONNX model which is based on `from_model` but only contains 1 `node`.
 
     :param from_model: ONNX model containing `node` and all ValueInfoProto and Initializer objects it refers to.
     :param node: ONNX node which will be the only node in the returned model.
+    :param get_tensor_data: A function which takes the name of a tensor, and returns its data or `None`. It also
+                             provides access to data which is not stored in the model, but was inferred during shape
+                             inference.
     :return: An ONNX model containing just the 1 given `node`.
     """
-    graph = onnx.helper.make_graph(
-        [node],
-        'single_node_model',
-        [_vi_for_name(from_model, input_) for input_ in node.input if _vi_exists(from_model, input_)],
-        [_vi_for_name(from_model, output) for output in node.output if _vi_exists(from_model, output)],
-        [t for t in from_model.graph.initializer if t.name in node.input],
-    )
 
-    return onnx.helper.make_model(graph)
+    return create_model_with_nodes(from_model, [node], node.input, node.output, get_tensor_data)
 
 
 def create_model_with_nodes(from_model: onnx.ModelProto, nodes: list[onnx.NodeProto], inputs: list[str],
-                            outputs: list[str]) -> onnx.ModelProto:
+                            outputs: list[str], get_tensor_data: Callable[[str], np.ndarray | None]) -> onnx.ModelProto:
     """ Create an ONNX model which is based on `from_model` and contains the given `nodes`.
          Include all the necessary `initializers`, `inputs` and `outputs`.
 
@@ -58,20 +57,37 @@ def create_model_with_nodes(from_model: onnx.ModelProto, nodes: list[onnx.NodePr
     :param nodes: ONNX nodes which will be the only nodes in the returned model.
     :param inputs: Names of the input tensors of the created model.
     :param outputs: Names of the output tensors of the created model.
+    :param get_tensor_data: A function which takes the name of a tensor, and returns its data or `None`. It also
+                             provides access to data which is not stored in the model, but was inferred during shape
+                             inference.
     :return: An ONNX model containing just the given `nodes`.
     """
-    if not all(_vi_exists(from_model, name) for name in chain(inputs, outputs)):
-        raise Exception('create_model_with_nodes(): the source model does not contain the necessary value info.')
 
     node_inputs = set(chain.from_iterable(node.input for node in nodes))
-    used_initializers = [t for t in from_model.graph.initializer if t.name in node_inputs]
+
+    inputs_and_their_data = {tensor_name: get_tensor_data(tensor_name) for tensor_name in node_inputs}
+    inputs_with_data = {name: data for name, data in inputs_and_their_data.items() if data is not None}
+    inputs_without_data = {name for name, data in inputs_and_their_data.items() if data is None}
+    if not all(_vi_exists(from_model, name) for name in inputs_without_data):
+        raise Exception('create_model_with_nodes(): the source model does not contain the necessary value info.')
+
+    # Initializers already stored in the model.
+    initializers = [t for t in from_model.graph.initializer if t.name in inputs_with_data.keys()]
+
+    if len(initializers) != len(inputs_with_data):
+        # Add tensors for which we have inferred data into the initializers.
+        processed_initializers = {t.name for t in initializers}
+        initializers.extend([
+            onnx.numpy_helper.from_array(data, name) for name, data in inputs_with_data.items() if
+            name not in processed_initializers
+        ])
 
     graph = onnx.helper.make_graph(
         nodes,
         'model_segment',
-        [_vi_for_name(from_model, input_) for input_ in inputs],
+        [_vi_for_name(from_model, input_) for input_ in inputs if input_ in inputs_without_data],
         [_vi_for_name(from_model, output) for output in outputs],
-        used_initializers
+        initializers
     )
 
     return onnx.helper.make_model(graph)
