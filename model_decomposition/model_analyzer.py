@@ -15,7 +15,7 @@ from model_decomposition.shape_inference import ShapeInference
 
 class ModelAnalyzer:
     """ Class analyzes an ONNX model and determines how it should be divided into segments. It also decides if the
-         segments will stay in ONNX or be converted to TFLite.
+         segments will stay in ONNX or be converted to LiteRT.
     """
 
     model: onnx.ModelProto
@@ -32,10 +32,10 @@ class ModelAnalyzer:
         # Supress the output of the `onnx2tflite`.
         onnx2tflite.src.logger.MIN_OUTPUT_IMPORTANCE = onnx2tflite.src.logger.MessageImportance.ERROR
 
-    def get_nodes_convertible_to_tflite(self) -> list[onnx.NodeProto]:
-        """ Analyze the provided ONNX model and determine which nodes can be converted to TFLite and which can't.
+    def get_nodes_convertible_to_litert(self) -> list[onnx.NodeProto]:
+        """ Analyze the provided ONNX model and determine which nodes can be converted to LiteRT and which can't.
 
-        :return: A list of nodes which *can* be converted to TFLite.
+        :return: A list of nodes which *can* be converted to LiteRT.
         """
         convertible_nodes = []
         for node in self.model.graph.node:
@@ -45,23 +45,23 @@ class ModelAnalyzer:
                 pass
 
             else:
-                # Create a model with just this node and try to convert it to TFLite.
+                # Create a model with just this node and try to convert it to LiteRT.
                 single_node_model = create_single_node_model(self.model, node, self.shape_inference.get_tensor_data)
 
                 # noinspection PyBroadException
                 try:
                     convert_model(single_node_model)
 
-                    # Mark this node as convertible to TFLite.
+                    # Mark this node as convertible to LiteRT.
                     convertible_nodes.append(node)
 
                 except Exception:
-                    # It is not possible to convert the node to TFLite.
+                    # It is not possible to convert the node to LiteRT.
                     pass
 
         return convertible_nodes
 
     # noinspection PyMethodMayBeStatic
-    def node_will_be_accelerated_in_tflite(self, node: onnx.NodeProto) -> bool:
-        """ Return `True`, if the provided `node` will use HW accelerators after conversion to TFLite. """
+    def node_will_be_accelerated_in_litert(self, node: onnx.NodeProto) -> bool:
+        """ Return `True`, if the provided `node` will use HW accelerators after conversion to LiteRT. """
         return node.op_type in {'Conv', 'Gemm'}  # TODO Verify and modify.

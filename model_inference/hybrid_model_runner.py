@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 import onnx
 from onnxruntime import InferenceSession
-from tflite_runtime.interpreter import Interpreter as TFLiteInterpreter
+from tflite_runtime.interpreter import Interpreter as LiteRTInterpreter
 
 from model_format.hybrid_model import HybridModel, ModelFormat
 
@@ -25,29 +25,29 @@ class ModelRunner(ABC):
         raise NotImplementedError
 
 
-class TFLiteRunner(ModelRunner):
-    tflite_interpreter: TFLiteInterpreter
+class LiteRTRunner(ModelRunner):
+    litert_interpreter: LiteRTInterpreter
 
     input_details: list[dict[str, any]]
     output_details: list[dict[str, any]]
 
     def __init__(self, model_raw_data: bytes):
-        self.tflite_interpreter = TFLiteInterpreter(model_content=model_raw_data)
-        self.tflite_interpreter.allocate_tensors()
+        self.litert_interpreter = LiteRTInterpreter(model_content=model_raw_data)
+        self.litert_interpreter.allocate_tensors()
 
-        self.input_details = self.tflite_interpreter.get_input_details()
-        self.output_details = self.tflite_interpreter.get_output_details()
+        self.input_details = self.litert_interpreter.get_input_details()
+        self.output_details = self.litert_interpreter.get_output_details()
 
     def run(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         # Set the input data.
         for input_detail in self.input_details:
-            self.tflite_interpreter.set_tensor(input_detail['index'], inputs[input_detail['name']])
+            self.litert_interpreter.set_tensor(input_detail['index'], inputs[input_detail['name']])
 
-        self.tflite_interpreter.invoke()
+        self.litert_interpreter.invoke()
 
         # Get the output data.
         outputs = {
-            output_detail['name']: self.tflite_interpreter.get_tensor(output_detail['index'])
+            output_detail['name']: self.litert_interpreter.get_tensor(output_detail['index'])
             for output_detail in self.output_details
         }
 
@@ -82,8 +82,8 @@ class HybridModelRunner:
         self.segment_runners = []
 
         for segment in self.hybrid_model.model_segments:
-            if segment.format == ModelFormat.TFLite:
-                self.segment_runners.append(TFLiteRunner(segment.raw_data))
+            if segment.format == ModelFormat.LiteRT:
+                self.segment_runners.append(LiteRTRunner(segment.raw_data))
 
             elif segment.format == ModelFormat.ONNX:
                 self.segment_runners.append(ONNXRunner(segment.raw_data))
