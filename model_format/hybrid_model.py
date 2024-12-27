@@ -14,11 +14,11 @@ from enum import Enum
 
 class ModelFormat(Enum):
     ONNX = 'onnx'
-    TFLite = 'tflite'
+    LiteRT = 'litert'
 
 
 class ModelSegment:
-    """ Class represents a part of the original model. Each segment is either in the ONNX or TFLite format. """
+    """ Class represents a part of the original model. Each segment is either in the ONNX or LiteRT format. """
 
     file_name: str
     format: ModelFormat
@@ -30,7 +30,7 @@ class ModelSegment:
                  inputs: list[str] | None = None, outputs: list[str] | None = None,
                  raw_data: bytes | None = None) -> None:
         if file_name is not None and format_ is not None:
-            file_extension = '.tflite' if format_ == ModelFormat.TFLite else '.onnx'
+            file_extension = '.tflite' if format_ == ModelFormat.LiteRT else '.onnx'
             self.file_name = file_name + file_extension
         self.format = format_
         self.inputs = inputs
@@ -59,12 +59,14 @@ class ModelSegment:
             raise KeyError(message) from e
 
     def _parse_model_format(self, name: str) -> ModelFormat:
-        try:
-            extension = os.path.splitext(self.file_name)[1][1:]
-            return ModelFormat(extension)
-
-        except ValueError:
-            raise ValueError(f'Model segment `{name}` has an unsupported file format.')
+        extension = os.path.splitext(self.file_name)[1][1:]
+        match extension:
+            case 'tflite':
+                return ModelFormat.LiteRT
+            case 'onnx':
+                return ModelFormat.ONNX
+            case _:
+                raise ValueError(f'Model segment `{name}` has an unsupported file format.')
 
     def to_json(self) -> dict[str, str | list[str]]:
         return {
@@ -133,7 +135,7 @@ class HybridModel:
             # Save the `meta`.
             zf.writestr('meta.json', json.dumps(meta))
 
-            # Save the individual TFLite and ONNX model segments.
+            # Save the individual LiteRT and ONNX model segments.
             for segment in self.model_segments:
                 zf.writestr(segment.file_name, segment.raw_data)
 

@@ -20,7 +20,7 @@ from model_format.hybrid_model import HybridModel, ModelFormat, ModelSegment
 class DecompositionStrategy(Enum):
     NAIVE = 1  # Convert every operator that can be converted.
 
-    # Convert all nodes which can utilize HW accelerators to `TFLite`, while minimizing the number of model segments.
+    # Convert all nodes which can utilize HW accelerators to `LiteRT`, while minimizing the number of model segments.
     RATIONAL = 2
 
 
@@ -32,7 +32,7 @@ class NodeGroup:
 
 
 class ModelDecomposer:
-    """ Class divides the input ONNX model into sections. Some of them get converted to TFLite and some stay in ONNX.
+    """ Class divides the input ONNX model into sections. Some of them get converted to LiteRT and some stay in ONNX.
          These sections are then combined into a hybrid model (hdnn).
     """
 
@@ -57,14 +57,14 @@ class ModelDecomposer:
         if group.format == ModelFormat.ONNX:
             segment.raw_data = onnx_model.SerializeToString()
 
-        elif group.format == ModelFormat.TFLite:
+        elif group.format == ModelFormat.LiteRT:
             # Create an ONNX model with the given `group.nodes` and necessary initializers.
             try:
-                tflite_model = convert_model(onnx_model)
-                segment.raw_data = tflite_model
+                litert_model = convert_model(onnx_model)
+                segment.raw_data = litert_model
 
             except Exception as e:
-                raise Exception('_create_model_segment_from_group(): failed to convert the segment to TFLite.') from e
+                raise Exception('_create_model_segment_from_group(): failed to convert the segment to LiteRT.') from e
 
         else:
             raise ValueError(f'_create_model_segment_from_group(): Unsupported format: {group.format}')
@@ -97,8 +97,8 @@ class ModelDecomposer:
             return last_group
 
         def _node_format(node_: onnx.NodeProto) -> ModelFormat:
-            """ Get the `ModelFormat` of the given `node_`. Either `TFLite` or `ONNX`. """
-            return ModelFormat.TFLite if node_ in nodes_to_convert else ModelFormat.ONNX
+            """ Get the `ModelFormat` of the given `node_`. Either `LiteRT` or `ONNX`. """
+            return ModelFormat.LiteRT if node_ in nodes_to_convert else ModelFormat.ONNX
 
         for node in self.model.graph.node:
             # noinspection PySimplifyBooleanCheck
@@ -171,15 +171,15 @@ class ModelDecomposer:
 
         return segments
 
-    def _merge_tflite_node_groups_without_accelerable_nodes_with_neighboring_groups(self, node_groups: list[NodeGroup],
+    def _merge_litert_node_groups_without_accelerable_nodes_with_neighboring_groups(self, node_groups: list[NodeGroup],
                                                                                     ) -> list[NodeGroup]:
         nodes_to_convert = []
         for node_group in node_groups:
-            if node_group.format != ModelFormat.TFLite:
+            if node_group.format != ModelFormat.LiteRT:
                 continue
 
-            if any(self.analyzer.node_will_be_accelerated_in_tflite(node) for node in node_group.nodes):
-                # Some nodes can be accelerated in this group, so it should still get converted to `TFLite`.
+            if any(self.analyzer.node_will_be_accelerated_in_litert(node) for node in node_group.nodes):
+                # Some nodes can be accelerated in this group, so it should still get converted to `LiteRT`.
                 nodes_to_convert.extend(node_group.nodes)
 
             else:
@@ -190,16 +190,16 @@ class ModelDecomposer:
 
     def create_hybrid_model(self, decomposition_strategy: DecompositionStrategy = DecompositionStrategy.NAIVE
                             ) -> HybridModel:
-        convertible_nodes = self.analyzer.get_nodes_convertible_to_tflite()
+        convertible_nodes = self.analyzer.get_nodes_convertible_to_litert()
         self.model = self.analyzer.model
 
         # Divide the model into groups of nodes.
         node_groups = self._split_model_into_groups(convertible_nodes)
 
         if decomposition_strategy == DecompositionStrategy.RATIONAL:
-            # Search for `TFLite` groups which only contain nodes that don't use HW accelerators. Remove these groups
+            # Search for `LiteRT` groups which only contain nodes that don't use HW accelerators. Remove these groups
             #  and merge their operators into neighbouring `ONNX` groups.
-            node_groups = self._merge_tflite_node_groups_without_accelerable_nodes_with_neighboring_groups(node_groups)
+            node_groups = self._merge_litert_node_groups_without_accelerable_nodes_with_neighboring_groups(node_groups)
 
         # Each group contains nodes which will make up 1 model segment.
         segments = self._create_model_segments_from_node_groups(node_groups)
