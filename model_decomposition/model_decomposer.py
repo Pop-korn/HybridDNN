@@ -9,7 +9,9 @@ from dataclasses import dataclass
 from enum import Enum
 from itertools import chain
 
+import numpy as np
 import onnx
+import sympy
 from onnx2tflite.src.converter.convert import convert_model
 
 from model_decomposition.model_analyzer import ModelAnalyzer
@@ -46,13 +48,39 @@ class ModelDecomposer:
 
         self.analyzer = ModelAnalyzer(self.model)
 
+    def _get_tensor_data(self, tensor_name: str) -> np.ndarray | None:
+        """ Get the static or inferred data of a given tensor, if that data is available. """
+
+        def _get_nested_initializers():
+            if not hasattr(_get_nested_initializers, 'initializers'):
+                _get_nested_initializers.initializers = []
+                for node in self.model.graph.node:
+                    if node.op_type == 'Loop':
+                        # The `Loop` operator contains an entire subgraph as its `body` attribute. Add its initializers
+                        #  to the list.
+                        assert node.attribute[0].name == 'body', 'Unexpected `Loop` attribute.'
+                        sub_graph = node.attribute[0].g
+                        _get_nested_initializers.initializers.extend(sub_graph.initializer)
+
+            return _get_nested_initializers.initializers
+
+        sympy_data = self.analyzer.shape_inference.get_tensor_data(tensor_name)
+        if isinstance(sympy_data, sympy.Symbol):  # The `Shape` operator can produce a `Symbol`.
+            sympy_data = None
+
+        if sympy_data is None:
+            nested_initializer = [i for i in _get_nested_initializers() if i.name == tensor_name]
+            if len(nested_initializer) == 1:
+                return nested_initializer[0]
+
+        return sympy_data
+
     def _create_model_segment_from_group(self, group: NodeGroup, inputs: list[str], outputs: list[str],
                                          index: int) -> ModelSegment:
         segment = ModelSegment(f'segment_{index}', group.format, inputs, outputs)
 
         # Create an ONNX model with the given `group.nodes` and necessary initializers.
-        onnx_model = create_model_with_nodes(self.model, group.nodes, inputs, outputs,
-                                             self.analyzer.shape_inference.get_tensor_data)
+        onnx_model = create_model_with_nodes(self.model, group.nodes, inputs, outputs, self._get_tensor_data)
 
         if group.format == ModelFormat.ONNX:
             segment.raw_data = onnx_model.SerializeToString()
@@ -140,12 +168,35 @@ class ModelDecomposer:
         """ Get a set of names of tensors which are external inputs to this node group. That means all node inputs which
              are not also outputs of other nodes in this group and are not initializers.
         """
-        all_node_inputs = set(chain.from_iterable(node.input for node in group.nodes))
-        all_node_outputs = set(chain.from_iterable(node.output for node in group.nodes))
-        initializers = set(t.name for t in self.model.graph.initializer)
+        all_node_outputs = set()  # set(chain.from_iterable(node.output for node in group.nodes))
+        all_node_inputs = set()  # set(chain.from_iterable(node.input for node in group.nodes))
+        for node in group.nodes:
+            all_node_inputs.update(node.input)
+            all_node_outputs.update(node.output)
 
-        # The segment inputs are tensors which are not produced within the segment and are not static initializers.
-        return all_node_inputs - all_node_outputs - initializers
+            if node.op_type == 'Loop':
+                # The `Loop` operator has another ONNX Graph inside its `body` attribute.
+                assert node.attribute[0].name == 'body'
+                sub_graph = node.attribute[0].g
+                loop_internal_inputs = set()
+                loop_internal_outputs = set()
+                for node_ in sub_graph.node:
+                    if node_.op_type == 'Loop':
+                        raise NotImplementedError('Nested `Loop` operators are not supported.')
+                    loop_internal_inputs.update(node_.input)
+                    loop_internal_outputs.update(node_.output)
+
+                # `Loop` uses inputs which are called differently in the outside graph and in its
+                #  internal graph. Remove the internal inputs, as they are duplicates.
+                for i in sub_graph.input:
+                    if i.name in loop_internal_inputs:
+                        loop_internal_inputs.remove(i.name)
+
+                all_node_inputs.update(loop_internal_inputs)
+                all_node_outputs.update(loop_internal_outputs)
+
+        # The segment inputs are tensors which are not produced within the segment and do NOT have static data.
+        return set(t for t in all_node_inputs - all_node_outputs if self._get_tensor_data(t) is None)
 
     def _create_model_segments_from_node_groups(self, node_groups: list[NodeGroup]) -> list[ModelSegment]:
         # Determine the inputs of all individual segments, which are represented as node groups.
