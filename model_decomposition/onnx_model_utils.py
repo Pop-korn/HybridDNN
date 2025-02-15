@@ -64,6 +64,7 @@ def create_model_with_nodes(from_model: onnx.ModelProto, nodes: list[onnx.NodePr
     """
 
     node_inputs = set(chain.from_iterable(node.input for node in nodes))
+    node_outputs = set(chain.from_iterable(node.output for node in nodes))
 
     inputs_and_their_data = {tensor_name: get_tensor_data(tensor_name) for tensor_name in node_inputs}
     inputs_with_data = {name: data for name, data in inputs_and_their_data.items() if data is not None}
@@ -77,10 +78,15 @@ def create_model_with_nodes(from_model: onnx.ModelProto, nodes: list[onnx.NodePr
     if len(initializers) != len(inputs_with_data):
         # Add tensors for which we have inferred data into the initializers.
         processed_initializers = {t.name for t in initializers}
-        initializers.extend([
-            onnx.numpy_helper.from_array(data, name) for name, data in inputs_with_data.items() if
-            name not in processed_initializers
-        ])
+        try:
+            initializers.extend([
+                onnx.numpy_helper.from_array(data, name) for name, data in inputs_with_data.items() if
+                name not in processed_initializers and  # Avoid adding the initializer multiple times.
+                name not in node_outputs  # Node outputs cannot have static data.
+            ])
+            pass
+        except Exception as e:
+            print(e)
 
     graph = onnx.helper.make_graph(
         nodes,
