@@ -8,7 +8,6 @@
 import json
 import os.path
 import zipfile
-
 from enum import Enum
 
 
@@ -75,8 +74,12 @@ class ModelSegment:
             'outputs': self.outputs
         }
 
+    def segment_size(self) -> int:
+        """ Return the size of the model segment in bytes. """
+        return len(self.raw_data)
+
     def __repr__(self) -> str:
-        return f'''\t- `{self.file_name}` ({self.format.name}).
+        return f'''\t- `{self.file_name}` ({self.format.name}) - {self.segment_size()} B
         Inputs: {self.inputs}
         Outputs: {self.outputs}
 '''
@@ -117,6 +120,9 @@ class HybridModel:
 
         except KeyError as e:
             raise KeyError(f'Failed to parse the hdnn file `{path}`. It is not in the expected format.') from e
+        except zipfile.BadZipFile as e:
+            raise Exception(
+                f"The provided file `{path}` couldn't be parsed, because it is not in the `.hdnn` format.") from e
 
     def store(self, path: str):
         """ Store the data in `self.model_segments` in a `zip` file. """
@@ -144,3 +150,13 @@ class HybridModel:
         segments_description = [repr(segment) for segment in self.model_segments]
 
         return description + ''.join(segments_description)
+
+    def save_segments(self, directory: str) -> None:
+        directory = os.path.join(os.getcwd(), directory)
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        for segment in self.model_segments:
+            file_path = os.path.join(directory, segment.file_name)
+            with open(file_path, 'wb') as f:
+                f.write(segment.raw_data)
