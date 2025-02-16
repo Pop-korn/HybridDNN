@@ -4,9 +4,10 @@
 # License: MIT
 # See the LICENSE for more details.
 #
-
+import numpy as np
 import onnx
 import onnx2tflite.src.logger
+from onnx.helper import tensor_dtype_to_np_dtype
 from onnx2tflite.src.converter.convert import convert_model
 
 from model_decomposition.onnx_model_utils import create_single_node_model, node_has_all_shapes_defined
@@ -27,6 +28,16 @@ class ModelAnalyzer:
         assert isinstance(model, onnx.ModelProto)
 
         self.shape_inference = ShapeInference(model)
+        self.model = self.shape_inference.run()
+
+        # Increase the opset_version to the minimum required by ONNXRuntime
+        self.model = onnx.version_converter.convert_version(self.model, 13)
+
+        # Remove ONNX nodes for which the output data is known.
+        self.remove_nodes_with_known_outputs()
+
+        # Run shape (and data) inference on the final model.
+        self.shape_inference = ShapeInference(self.model)
         self.model = self.shape_inference.run()
 
         # Supress the output of the `onnx2tflite`.
@@ -65,3 +76,27 @@ class ModelAnalyzer:
     def node_will_be_accelerated_in_litert(self, node: onnx.NodeProto) -> bool:
         """ Return `True`, if the provided `node` will use HW accelerators after conversion to LiteRT. """
         return node.op_type in {'Conv', 'Gemm'}  # TODO Verify and modify.
+
+    def remove_nodes_with_known_outputs(self):
+        nodes_to_remove = []
+        for node in self.model.graph.node:
+            if all(self.shape_inference.symbolic_shape_inference.sympy_data_.get(o, None) is not None
+                   for o in node.output):
+                try:
+                    initializers_to_add = []
+                    for o in node.output:
+                        data = self.shape_inference.symbolic_shape_inference.sympy_data_[o]
+                        output_vi = self.shape_inference.symbolic_shape_inference.known_vi_[o]
+                        np_type = tensor_dtype_to_np_dtype(output_vi.type.tensor_type.elem_type)
+                        data = np.asarray(data, np_type)
+                        static_tensor = onnx.numpy_helper.from_array(data, o)
+                        initializers_to_add.append(static_tensor)
+
+                    for initializer in initializers_to_add:
+                        self.model.graph.initializer.append(initializer)
+                    nodes_to_remove.append(node)
+                except Exception:
+                    pass
+
+        for node in nodes_to_remove:
+            self.model.graph.node.remove(node)
