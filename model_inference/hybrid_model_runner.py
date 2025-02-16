@@ -107,7 +107,10 @@ class HybridModelRunner:
 
             inputs = {name: data for name, data in known_tensors.items() if name in segment.inputs}
             outputs = segment_runner.run(inputs)
-            known_tensors.update(outputs)
+            for k, output in outputs.items():
+                if output.dtype == np.longlong:
+                    output = output.astype('int64')
+                known_tensors[k] = output
 
         # Return the data of the model outputs.
         return {name: data for name, data in known_tensors.items() if name in self.hybrid_model.outputs}
