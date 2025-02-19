@@ -74,12 +74,20 @@ class ModelSegment:
             'outputs': self.outputs
         }
 
-    def segment_size(self) -> int:
-        """ Return the size of the model segment in bytes. """
-        return len(self.raw_data)
+    def pretty_segment_size(self) -> str:
+        """ Return the size of the model segment as a string. """
+        units = ['B', 'KB', 'MB', 'GB', 'TB']
+        size = len(self.raw_data)
+        for unit in units:
+            if size < 1024:
+                return f'{size:0.2f} {unit}'
+            size /= 1024
+
+        # Ran out of units (should never happen).
+        return f'{size} {units[0]}'
 
     def __repr__(self) -> str:
-        return f'''\t- `{self.file_name}` ({self.format.name}) - {self.segment_size()} B
+        return f'''\t- `{self.file_name}` ({self.format.name}) - {self.pretty_segment_size()}
         Inputs: {self.inputs}
         Outputs: {self.outputs}
 '''
