@@ -4,11 +4,14 @@
 # License: MIT
 # See the LICENSE for more details.
 #
+import logging
+
 import numpy as np
 import onnx
 import onnx2tflite.src.logger
 from onnx.helper import tensor_dtype_to_np_dtype
 from onnx2tflite.src.converter.convert import convert_model
+from onnxruntime.tools.symbolic_shape_infer import get_shape_from_value_info
 
 from model_decomposition.onnx_model_utils import create_single_node_model, node_has_all_shapes_defined
 from model_decomposition.shape_inference import ShapeInference
@@ -89,6 +92,9 @@ class ModelAnalyzer:
                         output_vi = self.shape_inference.symbolic_shape_inference.known_vi_[o]
                         np_type = tensor_dtype_to_np_dtype(output_vi.type.tensor_type.elem_type)
                         data = np.asarray(data, np_type)
+                        if list(data.shape) != get_shape_from_value_info(output_vi):
+                            logging.warning(f'The value info shape, and inferred data shape differ for `{o}`.')
+                            raise RuntimeError
                         static_tensor = onnx.numpy_helper.from_array(data, o)
                         initializers_to_add.append(static_tensor)
 
