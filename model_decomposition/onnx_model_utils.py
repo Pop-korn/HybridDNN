@@ -25,7 +25,7 @@ def _vi_for_name(model: onnx.ModelProto, name: str) -> onnx.ValueInfoProto:
         if vi.name == name:
             return vi
 
-    raise KeyError
+    raise KeyError(f'Failed to find value info for `{name}`.')
 
 
 def _vi_exists(model: onnx.ModelProto, name: str) -> bool:
@@ -48,6 +48,48 @@ def create_single_node_model(from_model: onnx.ModelProto, node: onnx.NodeProto,
     return create_model_with_nodes(from_model, [node], node.input, node.output, get_tensor_data)
 
 
+InputNames = set[str]
+OutputNames = set[str]
+
+
+def get_io_names_for_all_nodes(nodes: list[onnx.NodeProto]) -> (InputNames, OutputNames):
+    all_node_outputs = set()
+    all_node_inputs = set()
+    for node in nodes:
+        all_node_inputs.update(node.input)
+        all_node_outputs.update(node.output)
+
+        if node.op_type == 'Loop':
+            # The `Loop` operator has another ONNX Graph inside its `body` attribute.
+            assert node.attribute[0].name == 'body'
+            sub_graph = node.attribute[0].g
+            # Recursively scan the subgraph, to support nested `Loop`/`If` nodes.
+            loop_internal_inputs, loop_internal_outputs = get_io_names_for_all_nodes(sub_graph.node)
+
+            # `Loop` uses inputs which are called differently in the outside graph and in its
+            #  internal graph. Remove the internal inputs.
+            for i in sub_graph.input:
+                if i.name in loop_internal_inputs:
+                    loop_internal_inputs.remove(i.name)
+
+            all_node_inputs.update(loop_internal_inputs)
+            all_node_outputs.update(loop_internal_outputs)
+
+        elif node.op_type == 'If':
+            # The `If` operator has another ONNX Graph inside its `else_branch` and `then_branch` attributes.
+            assert len(node.attribute) == 2
+            for attr in node.attribute:
+                assert 'branch' in attr.name
+                sub_graph = attr.g
+                # Recursively scan the subgraph, to support nested `Loop`/`If` nodes.
+                loop_internal_inputs, loop_internal_outputs = get_io_names_for_all_nodes(sub_graph.node)
+
+                all_node_inputs.update(loop_internal_inputs)
+                all_node_outputs.update(loop_internal_outputs)
+
+    return all_node_inputs, all_node_outputs
+
+
 def create_model_with_nodes(from_model: onnx.ModelProto, nodes: list[onnx.NodeProto], inputs: list[str],
                             outputs: list[str], get_tensor_data: Callable[[str], np.ndarray | None]) -> onnx.ModelProto:
     """ Create an ONNX model which is based on `from_model` and contains the given `nodes`.
@@ -63,14 +105,11 @@ def create_model_with_nodes(from_model: onnx.ModelProto, nodes: list[onnx.NodePr
     :return: An ONNX model containing just the given `nodes`.
     """
 
-    node_inputs = set(chain.from_iterable(node.input for node in nodes))
-    node_outputs = set(chain.from_iterable(node.output for node in nodes))
+    node_inputs, node_outputs = get_io_names_for_all_nodes(nodes)
 
     inputs_and_their_data = {tensor_name: get_tensor_data(tensor_name) for tensor_name in node_inputs}
     inputs_with_data = {name: data for name, data in inputs_and_their_data.items() if data is not None}
     inputs_without_data = {name for name, data in inputs_and_their_data.items() if data is None}
-    if not all(_vi_exists(from_model, name) for name in inputs_without_data):
-        raise Exception('create_model_with_nodes(): the source model does not contain the necessary value info.')
 
     # Initializers already stored in the model.
     initializers = [t for t in from_model.graph.initializer if t.name in inputs_with_data.keys()]
@@ -96,7 +135,10 @@ def create_model_with_nodes(from_model: onnx.ModelProto, nodes: list[onnx.NodePr
         initializers
     )
 
-    return onnx.helper.make_model(graph)
+    return onnx.helper.make_model(
+        graph,
+        opset_imports=[onnx.helper.make_opsetid(opset.domain, opset.version) for opset in from_model.opset_import],
+    )
 
 
 def _get_tensor_shape(model: onnx.ModelProto, tensor_name: str) -> list[int] | None:
