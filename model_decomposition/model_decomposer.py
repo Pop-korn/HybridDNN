@@ -146,11 +146,7 @@ class ModelDecomposer:
         def _get_last_group_this_node_depends_on(node_: onnx.NodeProto) -> int:
             """ Return the index of the last group of nodes that this `node_` depends on.  """
             last_group = 0
-            # TODO
-            #  `if node.op_type in ['Loop', 'If']:
-            #       Handle special case. The nested graph uses tensors which are outputs of previous nodes, but are not
-            #        mentioned as node inputs.
-            for input_ in node_.input:
+            for input_ in self._get_external_inputs_of_nodes([node]):
                 last_group = max(_get_group_generating_tensor(input_), last_group)
 
             return last_group
@@ -205,6 +201,7 @@ class ModelDecomposer:
     def _get_external_inputs_of_nodes(self, nodes: list[onnx.NodeProto]) -> set[str]:
         """ Get a set of names of tensors which are external inputs to a list of nodes. That means all node inputs which
              are not also outputs of other nodes in the list and are not initializers.
+            This function takes into account the "hidden" inputs of nested graphs of the ONNX `Loop` and `If` operators.
         """
 
         all_node_inputs, all_node_outputs = get_io_names_for_all_nodes(nodes)
