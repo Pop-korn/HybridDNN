@@ -1,5 +1,5 @@
 #
-# Copyright 2024 Martin Pavella
+# Copyright 2024-2025 Martin Pavella
 #
 # License: MIT
 # See the LICENSE for more details.
@@ -12,8 +12,10 @@ from itertools import chain
 import numpy as np
 import onnx
 import sympy
+from onnx2quant.qdq_quantization import CalibrationDataReader
 from onnx2tflite.src.converter.convert import convert_model
 
+from model_decomposition.hdnn_quantizer import HDNNQuantizer
 from model_decomposition.model_analyzer import ModelAnalyzer
 from model_decomposition.onnx_model_utils import create_model_with_nodes, get_io_names_for_all_nodes
 from model_format.hybrid_model import HybridModel, ModelFormat, ModelSegment
@@ -40,13 +42,15 @@ class ModelDecomposer:
 
     model: onnx.ModelProto
 
-    def __init__(self, model: onnx.ModelProto | str):
+    def __init__(self, model: onnx.ModelProto | str, calibration_data_reader: CalibrationDataReader | None = None):
         if isinstance(model, str):
             self.model = onnx.load(model)
         else:
             self.model = model
 
         self.analyzer = ModelAnalyzer(self.model)
+        self.model = self.analyzer.get_analyzed_model()
+        self.calibration_data_reader = calibration_data_reader
 
     def _get_tensor_data(self, tensor_name: str) -> np.ndarray | None:
         """ Get the static or inferred data of a given tensor, if that data is available. """
@@ -89,7 +93,7 @@ class ModelDecomposer:
         return sympy_data
 
     def _create_model_segment_from_group(self, group: NodeGroup, inputs: list[str], outputs: list[str],
-                                         index: int) -> ModelSegment:
+                                         index: int, hdnn_quantizer: HDNNQuantizer | None) -> ModelSegment:
         segment = ModelSegment(f'segment_{index}', group.format, inputs, outputs)
 
         # Create an ONNX model with the given `group.nodes` and necessary initializers.
@@ -99,9 +103,15 @@ class ModelDecomposer:
             segment.raw_data = onnx_model.SerializeToString()
 
         elif group.format == ModelFormat.LiteRT:
-            # Create an ONNX model with the given `group.nodes` and necessary initializers.
             try:
-                litert_model = convert_model(onnx_model)
+                if hdnn_quantizer is not None:
+                    # Quantize the ONNX model.
+                    quantized_onnx_model = hdnn_quantizer.quantize(onnx_model, inputs)
+                else:
+                    quantized_onnx_model = onnx_model
+
+                # Convert the quantized model to LiteRT using `onnx2tflite`.
+                litert_model = convert_model(quantized_onnx_model)
                 segment.raw_data = litert_model
 
             except Exception as e:
@@ -109,6 +119,10 @@ class ModelDecomposer:
 
         else:
             raise ValueError(f'_create_model_segment_from_group(): Unsupported format: {group.format}')
+
+        if hdnn_quantizer is not None:
+            # Compute the calibration data for the next segment.
+            hdnn_quantizer.compute_new_calibration_date(onnx_model, inputs)
 
         return segment
 
@@ -132,6 +146,10 @@ class ModelDecomposer:
         def _get_last_group_this_node_depends_on(node_: onnx.NodeProto) -> int:
             """ Return the index of the last group of nodes that this `node_` depends on.  """
             last_group = 0
+            # TODO
+            #  `if node.op_type in ['Loop', 'If']:
+            #       Handle special case. The nested graph uses tensors which are outputs of previous nodes, but are not
+            #        mentioned as node inputs.
             for input_ in node_.input:
                 last_group = max(_get_group_generating_tensor(input_), last_group)
 
@@ -182,7 +200,14 @@ class ModelDecomposer:
              are not also outputs of other nodes in this group and are not initializers.
         """
 
-        all_node_inputs, all_node_outputs = get_io_names_for_all_nodes(group.nodes)
+        return self._get_external_inputs_of_nodes(group.nodes)
+
+    def _get_external_inputs_of_nodes(self, nodes: list[onnx.NodeProto]) -> set[str]:
+        """ Get a set of names of tensors which are external inputs to a list of nodes. That means all node inputs which
+             are not also outputs of other nodes in the list and are not initializers.
+        """
+
+        all_node_inputs, all_node_outputs = get_io_names_for_all_nodes(nodes)
 
         # The segment inputs are tensors which are not produced within the segment and do NOT have static data.
         return set(t for t in all_node_inputs - all_node_outputs if self._get_tensor_data(t) is None)
@@ -206,8 +231,15 @@ class ModelDecomposer:
 
         # Now for every segment, we have its nodes, inputs and outputs. So we can start constructing the model segments.
         segments = []
+        if self.calibration_data_reader is not None:
+            hdnn_quantizer = HDNNQuantizer(self.calibration_data_reader)
+        else:
+            hdnn_quantizer = None
+
         for idx, (group, inputs, outputs) in enumerate(zip(node_groups, segment_inputs, segment_outputs)):
-            segments.append(self._create_model_segment_from_group(group, list(inputs), list(outputs), idx))
+            segments.append(
+                self._create_model_segment_from_group(group, list(inputs), list(outputs), idx, hdnn_quantizer)
+            )
 
         return segments
 
@@ -230,8 +262,8 @@ class ModelDecomposer:
 
     def create_hybrid_model(self, decomposition_strategy: DecompositionStrategy = DecompositionStrategy.NAIVE
                             ) -> HybridModel:
-        convertible_nodes = self.analyzer.get_nodes_convertible_to_litert()
-        self.model = self.analyzer.model
+        also_quantize = self.calibration_data_reader is not None
+        convertible_nodes = self.analyzer.get_nodes_convertible_to_litert(also_quantize)
 
         # Divide the model into groups of nodes.
         node_groups = self._split_model_into_groups(convertible_nodes)

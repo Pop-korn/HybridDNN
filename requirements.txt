@@ -1,4 +1,8 @@
-numpy
-onnx
+numpy~=1.26.4
+onnx~=1.15.0
 tensorflow
-onnxruntime
+onnxruntime~=1.17.3
+opencv-python~=4.10.0.84
+sympy~=1.12.1
+datasets~=3.3.2
+pillow~=10.4.0
