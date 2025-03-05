@@ -1,15 +1,17 @@
 #
-# Copyright 2024 Martin Pavella
+# Copyright 2024-2025 Martin Pavella
 #
 # License: MIT
 # See the LICENSE for more details.
 #
+
 import logging
 
 import numpy as np
 import onnx
 import onnx2tflite.src.logger
 from onnx.helper import tensor_dtype_to_np_dtype
+from onnx2quant.qdq_quantization import QDQQuantizer, QuantizationConfig, RandomDataCalibrationDataReader
 from onnx2tflite.src.converter.convert import convert_model
 from onnxruntime.tools.symbolic_shape_infer import get_shape_from_value_info
 
@@ -46,9 +48,13 @@ class ModelAnalyzer:
         # Supress the output of the `onnx2tflite`.
         onnx2tflite.src.logger.MIN_OUTPUT_IMPORTANCE = onnx2tflite.src.logger.MessageImportance.ERROR
 
-    def get_nodes_convertible_to_litert(self) -> list[onnx.NodeProto]:
+    def get_analyzed_model(self):
+        return self.model
+
+    def get_nodes_convertible_to_litert(self, also_quantize: bool = True) -> list[onnx.NodeProto]:
         """ Analyze the provided ONNX model and determine which nodes can be converted to LiteRT and which can't.
 
+        :param also_quantize: If `True`, the returned nodes are not just convertible, but also quantizable.
         :return: A list of nodes which *can* be converted to LiteRT.
         """
         convertible_nodes = []
@@ -64,13 +70,21 @@ class ModelAnalyzer:
 
                 # noinspection PyBroadException
                 try:
+                    if also_quantize:
+                        # Quantize the node with random data, just to see if the quantizer supports it.
+                        q_config = QuantizationConfig(
+                            RandomDataCalibrationDataReader.from_onnx_model(single_node_model, num_samples=1)
+                        )
+                        QDQQuantizer().quantize_model(single_node_model, q_config)
+
+                    # Try to convert the quantized node.
                     convert_model(single_node_model)
 
-                    # Mark this node as convertible to LiteRT.
+                    # Nothing crashed. Mark this node as convertible to LiteRT.
                     convertible_nodes.append(node)
 
                 except Exception:
-                    # It is not possible to convert the node to LiteRT.
+                    # It is not possible to quantize the node and convert it to LiteRT.
                     pass
 
         return convertible_nodes
