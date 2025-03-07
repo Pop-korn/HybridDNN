@@ -1,5 +1,5 @@
 #
-# Copyright 2024 Martin Pavella
+# Copyright 2024-2025 Martin Pavella
 #
 # License: MIT
 # See the LICENSE for more details.
@@ -8,7 +8,6 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
-import onnx
 from onnxruntime import InferenceSession
 from tflite_runtime.interpreter import Interpreter as LiteRTInterpreter
 
@@ -61,8 +60,7 @@ class ONNXRunner(ModelRunner):
 
     def __init__(self, model_raw_data: bytes):
         self.onnx_inference_session = InferenceSession(model_raw_data)
-        onnx_model = onnx.load_from_string(model_raw_data)
-        self.output_names = [output_vi.name for output_vi in onnx_model.graph.output]
+        self.output_names = [output_vi.name for output_vi in self.onnx_inference_session.get_outputs()]
 
     def run(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         output_tensors = self.onnx_inference_session.run(None, inputs)
