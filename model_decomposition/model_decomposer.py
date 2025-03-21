@@ -146,7 +146,7 @@ class ModelDecomposer:
         def _get_last_group_this_node_depends_on(node_: onnx.NodeProto) -> int:
             """ Return the index of the last group of nodes that this `node_` depends on.  """
             last_group = 0
-            for input_ in self._get_external_inputs_of_nodes([node]):
+            for input_ in self._get_external_inputs_of_nodes([node_]):
                 last_group = max(_get_group_generating_tensor(input_), last_group)
 
             return last_group
