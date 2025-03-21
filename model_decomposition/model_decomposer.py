@@ -94,6 +94,15 @@ class ModelDecomposer:
 
     def _create_model_segment_from_group(self, group: NodeGroup, inputs: list[str], outputs: list[str],
                                          index: int, hdnn_quantizer: HDNNQuantizer | None) -> ModelSegment:
+        """ Turn a group of nodes into a complete model segment.
+
+        :param group: Input group of nodes, representing the model segment.
+        :param inputs: Names of the inputs of the group.
+        :param outputs: Names of the output of the group.
+        :param index: Index of the group in the topological order of groups.
+        :param hdnn_quantizer: HDNNQuantizer to use for quantization.
+        :return: The created model segment.
+        """
         segment = ModelSegment(f'segment_{index}', group.format, inputs, outputs)
 
         # Create an ONNX model with the given `group.nodes` and necessary initializers.
@@ -127,6 +136,15 @@ class ModelDecomposer:
         return segment
 
     def _split_model_into_groups(self, nodes_to_convert: list[onnx.NodeProto]) -> list[NodeGroup]:
+        """ According to the mapping of `nodes_to_convert`, divide the ONNX model into groups of nodes such that:
+                - every group only contains nodes which are either all in `nodes_to_convert`, or are all not in the
+                   list.
+                - the resulting groups can be topologically sorted, meaning there are no dependency cycles formed
+                   between the groups via input and output tensors.
+
+        :param nodes_to_convert:
+        :return: List of the created node groups.
+        """
         groups = [
             NodeGroup(
                 nodes=[],
@@ -242,6 +260,12 @@ class ModelDecomposer:
 
     def _merge_litert_node_groups_without_accelerable_nodes_with_neighboring_groups(self, node_groups: list[NodeGroup],
                                                                                     ) -> list[NodeGroup]:
+        """ Remove LiteRT node groups which only contain nodes that do not utilize HW in the LiteRT format, and add
+             their nodes into the neighboring groups.
+
+        :param node_groups:
+        :return:
+        """
         nodes_to_convert = []
         for node_group in node_groups:
             if node_group.format != ModelFormat.LiteRT:
@@ -259,6 +283,12 @@ class ModelDecomposer:
 
     def create_hybrid_model(self, decomposition_strategy: DecompositionStrategy = DecompositionStrategy.NAIVE
                             ) -> HybridModel:
+        """ Create a HybridModel from the ONNX model in `self.model` using the selected decomposition strategy.
+
+        :param decomposition_strategy: Strategy to use when partitioning the graph. Different strategies can result in
+                                        differently fragmented models.
+        :return: The created HybridModel.
+        """
         also_quantize = self.calibration_data_reader is not None
         convertible_nodes = self.analyzer.get_nodes_convertible_to_litert(also_quantize)
 

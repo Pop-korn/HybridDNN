@@ -95,6 +95,9 @@ class ModelAnalyzer:
         return node.op_type in {'Conv', 'Gemm'}  # TODO Verify and modify.
 
     def remove_nodes_with_known_outputs(self):
+        """ Remove nodes from `self.model`, for which the output data has been statically inferred by the shape
+             inference tool, and add their output data to the model in the form of `initializers` (static tensors).
+        """
         nodes_to_remove = []
         for node in self.model.graph.node:
             if all(self.shape_inference.symbolic_shape_inference.sympy_data_.get(o, None) is not None

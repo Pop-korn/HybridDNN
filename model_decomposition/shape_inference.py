@@ -18,6 +18,9 @@ from onnxruntime.tools.symbolic_shape_infer import SymbolicShapeInference, get_a
 
 # noinspection PyPep8Naming
 class ShapeInference:
+    """ Class which computes the shapes of internal tensors of an ONNX model, and also computes the output data for some
+         nodes when it is statically possible. It extends the ONNX Runtime SymbolicShapeInference to do this.
+    """
     model: onnx.ModelProto
     symbolic_shape_inference: SymbolicShapeInference
 
@@ -36,10 +39,24 @@ class ShapeInference:
 
     # noinspection PyProtectedMember
     def _try_get_value(self, node: onnx.NodeProto, input_index: int) -> np.ndarray | None:
+        """ Return the data for the input tensor on index `input_index` for the given node, if it exists. Otherwise,
+             return `None`.
+
+        :param node: Node to get the input data for.
+        :param input_index: Index to the `node.input`.
+        :return: The data of the input, or `None`.
+        """
         return self.symbolic_shape_inference._try_get_value(node, input_index)
 
     # noinspection PyProtectedMember
     def _get_shape(self, node: onnx.NodeProto, input_index: int) -> list[int] | None:
+        """ Return the shape for the input tensor on index `input_index` for the given node, if it exists. Otherwise,
+             return `None`.
+
+        :param node: Node to get the input shape for.
+        :param input_index: Index to the `node.input`.
+        :return: The shape of the input, or `None`.
+        """
         try:
             return self.symbolic_shape_inference._get_shape(node, input_index)
         except AssertionError:
@@ -62,6 +79,11 @@ class ShapeInference:
         return self.symbolic_shape_inference.initializers_
 
     def _infer_Reshape(self, node):  # noqa: N802
+        """ Custom dispatcher for the `Reshape` operator. It replaces the original one by ONNX Runtime, to solve data
+             inference issues.
+
+            :param node: Node to infer the shapes and data for.
+        """
         shape_value = self._try_get_value(node, 1)
         vi = self.known_vi_[node.output[0]]
         if shape_value is None:
@@ -123,6 +145,11 @@ class ShapeInference:
                 pass  # Failed to inter the data. No action needed.
 
     def _infer_Unsqueeze(self, node):  # noqa: N802
+        """ Custom dispatcher for the `Unsqueeze` operator. It replaces the original one by ONNX Runtime, to solve data
+             inference issues.
+
+            :param node: Node to infer the shapes and data for.
+        """
         input_shape = self._get_shape(node, 0)
         op_set = get_opset(self.out_mp_)
 
@@ -167,6 +194,11 @@ class ShapeInference:
             pass  # Failed to inter the data. No action needed.
 
     def _infer_Squeeze(self, node):  # noqa: N802
+        """ Custom dispatcher for the `Squeeze` operator. It replaces the original one by ONNX Runtime, to solve data
+             inference issues.
+
+            :param node: Node to infer the shapes and data for.
+        """
         input_shape = self._get_shape(node, 0)
         op_set = get_opset(self.out_mp_)
 
@@ -225,6 +257,11 @@ class ShapeInference:
             pass  # Failed to inter the data. No action needed.
 
     def _infer_Concat(self, node):  # noqa: N802
+        """ Custom dispatcher for the `Concat` operator. It replaces the original one by ONNX Runtime, to solve data
+             inference issues.
+
+            :param node: Node to infer the shapes and data for.
+        """
         # Try to infer the data.
         # noinspection PyBroadException
         try:
@@ -272,6 +309,7 @@ class ShapeInference:
 
     # noinspection PyProtectedMember
     def _infer_shapes(self):
+        """ Infer the shapes of internal tensors of `self.model`. """
         onnx_opset = get_opset(self.model)
         if (not onnx_opset) or onnx_opset < 7:
             logging.warning("Only support models of onnx opset 7 and above.")
@@ -289,9 +327,15 @@ class ShapeInference:
         return self.model
 
     def run(self) -> onnx.ModelProto:
+        """ MAIN ENTRY POINT. Run the shape inference and return the ONNX model with inferred shapes. """
         return self._infer_shapes()
 
     def get_tensor_data(self, tensor_name: str) -> np.ndarray | None:
+        """ Get the data for the tensor with the given name, or `None` if the data is not available.
+
+        :param tensor_name: Name of the tensor to get the data for.
+        :return: The data of the tensor, or `None`.
+        """
         if tensor_name in self.symbolic_shape_inference.sympy_data_ or tensor_name in self.symbolic_shape_inference.initializers_:
             data = self.symbolic_shape_inference.sympy_data_[
                 tensor_name] if tensor_name in self.symbolic_shape_inference.sympy_data_ else numpy_helper.to_array(
