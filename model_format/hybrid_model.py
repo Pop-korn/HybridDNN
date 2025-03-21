@@ -38,6 +38,12 @@ class ModelSegment:
 
     @classmethod
     def from_json(cls, json_segment: dict[str, str | list[str]], data: bytes) -> 'ModelSegment':
+        """ Create a `ModelSegment` from the provided raw `data` and the metadata in JSON format.
+
+        :param json_segment: JSON metadata of the segment.
+        :param data: Raw data of the DNN model in the segment.
+        :return: A new `ModelSegment` instance.
+        """
         try:
             obj = cls()
 
@@ -58,6 +64,7 @@ class ModelSegment:
             raise KeyError(message) from e
 
     def _parse_model_format(self, name: str) -> ModelFormat:
+        """ Get a valid `ModelFormat` value from a string representation of the formats associated file extension. """
         extension = os.path.splitext(self.file_name)[1][1:]
         match extension:
             case 'tflite':
@@ -68,6 +75,10 @@ class ModelSegment:
                 raise ValueError(f'Model segment `{name}` has an unsupported file format.')
 
     def to_json(self) -> dict[str, str | list[str]]:
+        """ Return a JSON representation of this ModelSegment.
+
+        :return: JSON representation of this model segments, represented as dicts and lists of strings.
+        """
         return {
             'name': self.file_name,
             'inputs': self.inputs,
@@ -75,7 +86,7 @@ class ModelSegment:
         }
 
     def pretty_segment_size(self) -> str:
-        """ Return the size of the model segment as a string. """
+        """ Return the size of the model segment as a string with "pretty" formatting. """
         units = ['B', 'KB', 'MB', 'GB', 'TB']
         size = len(self.raw_data)
         for unit in units:
@@ -84,9 +95,10 @@ class ModelSegment:
             size /= 1024
 
         # Ran out of units (should never happen).
-        return f'{size} {units[0]}'
+        return f'{len(self.raw_data)} {units[0]}'
 
     def __repr__(self) -> str:
+        """ Represent this segment in a debug string. """
         return f'''\t- `{self.file_name}` ({self.format.name}) - {self.pretty_segment_size()}
         Inputs: {self.inputs}
         Outputs: {self.outputs}
@@ -154,12 +166,17 @@ class HybridModel:
                 zf.writestr(segment.file_name, segment.raw_data)
 
     def __repr__(self) -> str:
+        """ Represent the HybridModel in a debug string. """
         description = f'Model of {len(self.model_segments)} segments.\n'
         segments_description = [repr(segment) for segment in self.model_segments]
 
         return description + ''.join(segments_description)
 
     def save_segments(self, directory: str) -> None:
+        """ Store all the internal model segments in the provided directory. This is used only for debugging purposes.
+
+        :param directory: Directory to store the segments in.
+        """
         directory = os.path.join(os.getcwd(), directory)
         if not os.path.exists(directory):
             os.makedirs(directory)

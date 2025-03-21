@@ -53,6 +53,11 @@ OutputNames = set[str]
 
 
 def get_io_names_for_all_nodes(nodes: list[onnx.NodeProto]) -> (InputNames, OutputNames):
+    """ Get the names of all input and output tensors for all nodes in the given list of nodes.
+
+    :param nodes: List of nodes to analyze.
+    :return: (Set of names of inputs of all nodes, Set of names of outputs of all nodes)
+    """
     all_node_outputs = set()
     all_node_inputs = set()
     for node in nodes:

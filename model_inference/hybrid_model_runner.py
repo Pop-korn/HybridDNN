@@ -15,6 +15,8 @@ from model_format.hybrid_model import HybridModel, ModelFormat
 
 
 class ModelRunner(ABC):
+    """ Abstract interface class to run inference on a DNN model. """
+
     @abstractmethod
     def __init__(self, model_raw_data: bytes):
         raise NotImplementedError
@@ -25,6 +27,9 @@ class ModelRunner(ABC):
 
 
 class LiteRTRunner(ModelRunner):
+    """ Helper class to run inference on a LiteRT model. """
+
+    # The interpreter should support WH accelerators if available.
     litert_interpreter: LiteRTInterpreter
 
     input_details: list[dict[str, any]]
@@ -38,6 +43,11 @@ class LiteRTRunner(ModelRunner):
         self.output_details = self.litert_interpreter.get_output_details()
 
     def run(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """ Run inference of the LiteRT model with the provided data, and return the outputs.
+
+        :param inputs: Dictionary mapping names of input tensors to their data.
+        :return: Dictionary mapping names of output tensors to their data.
+        """
         # Set the input data.
         for input_detail in self.input_details:
             self.litert_interpreter.set_tensor(input_detail['index'], inputs[input_detail['name']])
@@ -54,6 +64,8 @@ class LiteRTRunner(ModelRunner):
 
 
 class ONNXRunner(ModelRunner):
+    """ Helper class to run inference on an ONNX model. """
+
     onnx_inference_session: InferenceSession
 
     output_names: list[str]  # Name of the output tensors of the segment in the correct order.
@@ -63,12 +75,19 @@ class ONNXRunner(ModelRunner):
         self.output_names = [output_vi.name for output_vi in self.onnx_inference_session.get_outputs()]
 
     def run(self, inputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        """ Run inference of the LiteRT model with the provided data, and return the outputs.
+
+        :param inputs: Dictionary mapping names of input tensors to their data.
+        :return: Dictionary mapping names of output tensors to their data.
+        """
         output_tensors = self.onnx_inference_session.run(None, inputs)
         outputs = dict(zip(self.output_names, output_tensors))
         return outputs
 
 
 class HybridModelRunner:
+    """ Class to run efficient inference on a HybridModel using existing ONNX and LiteRT inference providers. """
+
     hybrid_model: HybridModel
 
     # A list of ModelRunners for every segment. The order of the runners matches the order of the segments in the
@@ -90,19 +109,14 @@ class HybridModelRunner:
                 raise ValueError(f'HybridModelInterpreter: invalid segment format `{segment.format}`.')
 
     def run(self, inputs: dict[str, np.ndarray]) -> dict[str: np.ndarray]:
-        """ Run the hybrid model with the provided `inputs` and return the produced output tensors. """
+        """ Run the hybrid model with the provided `inputs` and return the produced output tensors.
+
+        :param inputs: Dictionary mapping names of input tensors to their data.
+        :return: Dictionary mapping names of output tensors to their data.
+        """
         known_tensors = inputs.copy()
 
         for segment, segment_runner in zip(self.hybrid_model.model_segments, self.segment_runners):
-            # TODO This significantly slows down the inference. Verify statically in the `__init__()` method that this
-            #  will not cause problems.
-            # for input_ in segment.inputs:
-            #     if input_ not in known_tensors.keys():
-            #         raise KeyError(f'HybridModelRunner.run(): Invalid hybrid model. Segment `{segment.file_name}` '
-            #                        f'requires the input tensor `{input_}`, which is not a model input nor an output of '
-            #                        'a previous segment.')
-
-
             inputs = {name: data for name, data in known_tensors.items() if name in segment.inputs}
             outputs = segment_runner.run(inputs)
             for k, output in outputs.items():
