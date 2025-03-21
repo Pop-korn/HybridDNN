@@ -12,7 +12,7 @@ import numpy as np
 import onnx
 from onnx2quant.qdq_quantization import CalibrationDataReader, QDQQuantizer, QuantizationConfig
 
-from model_inference.hybrid_model_runner import ONNXRunner
+from src.model_inference.hybrid_model_runner import ONNXRunner
 
 
 class EvolvingDataReader(CalibrationDataReader):

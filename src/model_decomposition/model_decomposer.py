@@ -15,10 +15,10 @@ import sympy
 from onnx2quant.qdq_quantization import CalibrationDataReader
 from onnx2tflite.src.converter.convert import convert_model
 
-from model_decomposition.hdnn_quantizer import HDNNQuantizer
-from model_decomposition.model_analyzer import ModelAnalyzer
-from model_decomposition.onnx_model_utils import create_model_with_nodes, get_io_names_for_all_nodes
-from model_format.hybrid_model import HybridModel, ModelFormat, ModelSegment
+from src.model_decomposition.hdnn_quantizer import HDNNQuantizer
+from src.model_decomposition.model_analyzer import ModelAnalyzer
+from src.model_decomposition.onnx_model_utils import create_model_with_nodes, get_io_names_for_all_nodes
+from src.model_format.hybrid_model import HybridModel, ModelFormat, ModelSegment
 
 
 class DecompositionStrategy(Enum):

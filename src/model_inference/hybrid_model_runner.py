@@ -11,7 +11,7 @@ import numpy as np
 from onnxruntime import InferenceSession
 from tflite_runtime.interpreter import Interpreter as LiteRTInterpreter
 
-from model_format.hybrid_model import HybridModel, ModelFormat
+from src.model_format.hybrid_model import HybridModel, ModelFormat
 
 
 class ModelRunner(ABC):

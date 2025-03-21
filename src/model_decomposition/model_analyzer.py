@@ -15,8 +15,8 @@ from onnx2quant.qdq_quantization import QDQQuantizer, QuantizationConfig, Random
 from onnx2tflite.src.converter.convert import convert_model
 from onnxruntime.tools.symbolic_shape_infer import get_shape_from_value_info
 
-from model_decomposition.onnx_model_utils import create_single_node_model, node_has_all_shapes_defined
-from model_decomposition.shape_inference import ShapeInference
+from src.model_decomposition.onnx_model_utils import create_single_node_model, node_has_all_shapes_defined
+from src.model_decomposition.shape_inference import ShapeInference
 
 
 class ModelAnalyzer:
