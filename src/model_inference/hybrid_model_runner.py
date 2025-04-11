@@ -9,7 +9,13 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from onnxruntime import InferenceSession
-from tflite_runtime.interpreter import Interpreter as LiteRTInterpreter
+
+# If executed on i.MX platform, there is no tensorflow module. And typically the intention is to use the tflite python
+# interpreter available in tflite_runtime
+try:
+    import tensorflow.lite as tflite
+except ModuleNotFoundError:
+    import tflite_runtime.interpreter as tflite
 
 from src.model_format.hybrid_model import HybridModel, ModelFormat
 
@@ -30,13 +36,16 @@ class LiteRTRunner(ModelRunner):
     """ Helper class to run inference on a LiteRT model. """
 
     # The interpreter should support WH accelerators if available.
-    litert_interpreter: LiteRTInterpreter
+    litert_interpreter: tflite.Interpreter
 
     input_details: list[dict[str, any]]
     output_details: list[dict[str, any]]
 
     def __init__(self, model_raw_data: bytes):
-        self.litert_interpreter = LiteRTInterpreter(model_content=model_raw_data)
+        self.litert_interpreter = tflite.Interpreter(
+            model_content=model_raw_data,
+            experimental_delegates=[tflite.load_delegate('/usr/lib/libvx_delegate.so')]  # Delegate on i.MX 8M Plus
+        )
         self.litert_interpreter.allocate_tensors()
 
         self.input_details = self.litert_interpreter.get_input_details()
