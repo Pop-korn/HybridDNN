@@ -79,11 +79,13 @@ class ShapeInference:
         return self.symbolic_shape_inference.initializers_
 
     def _infer_Reshape(self, node):  # noqa: N802
-        """ Custom dispatcher for the `Reshape` operator. It replaces the original one by ONNX Runtime, to solve data
+        """ Custom dispatcher for the `Reshape` operator. It extends the original one by ONNX Runtime, to solve data
              inference issues.
 
             :param node: Node to infer the shapes and data for.
         """
+
+        # ---- START OF CODE TAKEN FROM ONNX RUNTIME ----
         shape_value = self._try_get_value(node, 1)
         vi = self.known_vi_[node.output[0]]
         if shape_value is None:
@@ -132,7 +134,8 @@ class ShapeInference:
                     get_shape_from_sympy_shape(new_sympy_shape),
                 )
             )
-
+            # ---- END OF CODE TAKEN FROM ONNX RUNTIME ----
+            
             # Try to infer the output data.
             # noinspection PyBroadException
             try:
@@ -145,11 +148,13 @@ class ShapeInference:
                 pass  # Failed to inter the data. No action needed.
 
     def _infer_Unsqueeze(self, node):  # noqa: N802
-        """ Custom dispatcher for the `Unsqueeze` operator. It replaces the original one by ONNX Runtime, to solve data
+        """ Custom dispatcher for the `Unsqueeze` operator. It extends the original one by ONNX Runtime, to solve data
              inference issues.
 
             :param node: Node to infer the shapes and data for.
         """
+        
+        # ---- START OF CODE TAKEN FROM ONNX RUNTIME ----
         input_shape = self._get_shape(node, 0)
         op_set = get_opset(self.out_mp_)
 
@@ -181,6 +186,7 @@ class ShapeInference:
                 output_shape,
             )
         )
+        # ---- END OF CODE TAKEN FROM ONNX RUNTIME ----
 
         # Try to infer the output data.
         # noinspection PyBroadException
@@ -194,11 +200,13 @@ class ShapeInference:
             pass  # Failed to inter the data. No action needed.
 
     def _infer_Squeeze(self, node):  # noqa: N802
-        """ Custom dispatcher for the `Squeeze` operator. It replaces the original one by ONNX Runtime, to solve data
+        """ Custom dispatcher for the `Squeeze` operator. It extends the original one by ONNX Runtime, to solve data
              inference issues.
 
             :param node: Node to infer the shapes and data for.
         """
+
+        # ---- START OF CODE TAKEN FROM ONNX RUNTIME ----
         input_shape = self._get_shape(node, 0)
         op_set = get_opset(self.out_mp_)
 
@@ -244,6 +252,7 @@ class ShapeInference:
                 output_shape,
             )
         )
+        # ---- END OF CODE TAKEN FROM ONNX RUNTIME ----
 
         # Try to infer the output data.
         # noinspection PyBroadException
@@ -257,7 +266,7 @@ class ShapeInference:
             pass  # Failed to inter the data. No action needed.
 
     def _infer_Concat(self, node):  # noqa: N802
-        """ Custom dispatcher for the `Concat` operator. It replaces the original one by ONNX Runtime, to solve data
+        """ Custom dispatcher for the `Concat` operator. It extends the original one by ONNX Runtime, to solve data
              inference issues.
 
             :param node: Node to infer the shapes and data for.
@@ -279,6 +288,7 @@ class ShapeInference:
         except Exception:
             pass  # Failed to inter the data. No action needed.
 
+        # ---- START OF CODE TAKEN FROM ONNX RUNTIME ----
         sympy_shape = self.symbolic_shape_inference._get_sympy_shape(node, 0)
         axis = handle_negative_axis(get_attribute(node, "axis"), len(sympy_shape))
         for i_idx in range(1, len(node.input)):
@@ -306,6 +316,7 @@ class ShapeInference:
                 get_shape_from_sympy_shape(sympy_shape),
             )
         )
+        # ---- END OF CODE TAKEN FROM ONNX RUNTIME ----
 
     # noinspection PyProtectedMember
     def _infer_shapes(self):
