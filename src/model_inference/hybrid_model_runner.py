@@ -5,10 +5,11 @@
 # See the LICENSE for more details.
 #
 
-from abc import ABC, abstractmethod
-
 import numpy as np
+from abc import ABC, abstractmethod
 from onnxruntime import InferenceSession
+
+from src.model_inference.hdnn_profiler import HDNNProfiler
 
 # If executed on i.MX platform, there is no tensorflow module. And typically the intention is to use the tflite python
 # interpreter available in tflite_runtime
@@ -41,10 +42,19 @@ class LiteRTRunner(ModelRunner):
     input_details: list[dict[str, any]]
     output_details: list[dict[str, any]]
 
-    def __init__(self, model_raw_data: bytes):
+    def __init__(
+            self,
+            model_raw_data: bytes,
+            delegate_paths: list[str],
+            model_name: str = "unnamed_litert_model",
+            profiler: HDNNProfiler | None = None
+    ):
+        self.model_name = model_name
+        self.profiler = profiler
+
         self.litert_interpreter = tflite.Interpreter(
             model_content=model_raw_data,
-            experimental_delegates=[tflite.load_delegate('/usr/lib/libvx_delegate.so')]  # Delegate on i.MX 8M Plus
+            experimental_delegates=[tflite.load_delegate(delegate_path) for delegate_path in delegate_paths]
         )
         self.litert_interpreter.allocate_tensors()
 
@@ -61,7 +71,11 @@ class LiteRTRunner(ModelRunner):
         for input_detail in self.input_details:
             self.litert_interpreter.set_tensor(input_detail['index'], inputs[input_detail['name']])
 
-        self.litert_interpreter.invoke()
+        if self.profiler is None:
+            self.litert_interpreter.invoke()
+        else:
+            with self.profiler.time(self.model_name):
+                self.litert_interpreter.invoke()
 
         # Get the output data.
         outputs = {
@@ -79,7 +93,14 @@ class ONNXRunner(ModelRunner):
 
     output_names: list[str]  # Name of the output tensors of the segment in the correct order.
 
-    def __init__(self, model_raw_data: bytes):
+    def __init__(
+            self,
+            model_raw_data: bytes,
+            model_name: str = "unnamed_onnx_model",
+            profiler: HDNNProfiler | None = None
+    ):
+        self.model_name = model_name
+        self.profiler = profiler
         self.onnx_inference_session = InferenceSession(model_raw_data)
         self.output_names = [output_vi.name for output_vi in self.onnx_inference_session.get_outputs()]
 
@@ -89,7 +110,12 @@ class ONNXRunner(ModelRunner):
         :param inputs: Dictionary mapping names of input tensors to their data.
         :return: Dictionary mapping names of output tensors to their data.
         """
-        output_tensors = self.onnx_inference_session.run(None, inputs)
+        if self.profiler is None:
+            output_tensors = self.onnx_inference_session.run(None, inputs)
+        else:
+            with self.profiler.time(self.model_name):
+                output_tensors = self.onnx_inference_session.run(None, inputs)
+
         outputs = dict(zip(self.output_names, output_tensors))
         return outputs
 
@@ -103,16 +129,28 @@ class HybridModelRunner:
     #  `hybrid_model.segments`.
     segment_runners: list[ModelRunner]
 
-    def __init__(self, hybrid_model: HybridModel):
+    def __init__(
+            self,
+            hybrid_model: HybridModel,
+            litert_delegate_paths: list[str] | None = None,
+            hdnn_profiler: HDNNProfiler | None = None
+    ):
         self.hybrid_model = hybrid_model
         self.segment_runners = []
 
+        if litert_delegate_paths is None:
+            litert_delegate_paths = ['/usr/lib/libvx_delegate.so']  # Delegate on i.MX 8M Plus
+
         for segment in self.hybrid_model.model_segments:
             if segment.format == ModelFormat.LiteRT:
-                self.segment_runners.append(LiteRTRunner(segment.raw_data))
+                self.segment_runners.append(
+                    LiteRTRunner(segment.raw_data, litert_delegate_paths, segment.file_name, hdnn_profiler)
+                )
 
             elif segment.format == ModelFormat.ONNX:
-                self.segment_runners.append(ONNXRunner(segment.raw_data))
+                self.segment_runners.append(
+                    ONNXRunner(segment.raw_data, segment.file_name, hdnn_profiler)
+                )
 
             else:
                 raise ValueError(f'HybridModelInterpreter: invalid segment format `{segment.format}`.')
